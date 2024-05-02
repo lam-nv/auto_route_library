@@ -35,11 +35,20 @@ class DeferredWidget extends StatefulWidget {
   static final Map<LibraryLoader, Future<void>> _moduleLoaders = {};
   static final Set<LibraryLoader> _loadedModules = {};
 
-  static Future<void> _preload(LibraryLoader loader) {
+  static Future<void> _preload(LibraryLoader loader) async {
     if (!_moduleLoaders.containsKey(loader)) {
-      _moduleLoaders[loader] = loader().then((dynamic _) {
+      try {
+        final future = loader();
+        _moduleLoaders[loader] = future;
+
+        await future;
+        // print('Loaded module: $loader');
+
         _loadedModules.add(loader);
-      });
+      } catch (exception) {
+        // print('Failed to load module: $loader with error: $exception');
+        rethrow;
+      }
     }
     return _moduleLoaders[loader]!;
   }
@@ -61,7 +70,14 @@ class _DeferredWidgetState extends State<DeferredWidget> {
     if (DeferredWidget._loadedModules.contains(widget.libraryLoader)) {
       _onLibraryLoaded();
     } else {
-      DeferredWidget._preload(widget.libraryLoader).then((dynamic _) => _onLibraryLoaded());
+      var preload = DeferredWidget._preload(widget.libraryLoader);
+      preload.then(
+        (dynamic _) => _onLibraryLoaded(),
+        onError: (dynamic error) {
+          print('Error loading deferred module: $error');
+          DeferredLoadNotification(error).dispatch(context);
+        },
+      );
     }
     super.initState();
   }
@@ -82,7 +98,9 @@ class _DeferredWidgetState extends State<DeferredWidget> {
       _loadedChild = _loadedCreator!();
     }
 
-    final placeHolder = AutoRouterDelegate.of(context).placeholder?.call(context) ?? const DeferredLoadingPlaceholder();
+    final placeHolder =
+        AutoRouterDelegate.of(context).placeholder?.call(context) ??
+            const DeferredLoadingPlaceholder();
     return _loadedChild ?? placeHolder;
   }
 }
@@ -103,4 +121,15 @@ class DeferredLoadingPlaceholder extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A notification that is dispatched when a deferred module is loaded
+class DeferredLoadNotification extends Notification {
+  /// The error that occurred during the loading of the deferred module
+  final DeferredLoadException error;
+
+  /// default constructor
+  DeferredLoadNotification(
+    this.error,
+  );
 }
